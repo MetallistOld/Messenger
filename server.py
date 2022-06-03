@@ -4,12 +4,17 @@ import sys
 import json
 import logging
 import logs.config_server_log
+from errors import IncorrectDataRecivedError
 from common.variables import ACTION, ACCOUNT_NAME, RESPONSE, MAX_CONNECTIONS, \
     PRESENCE, TIME, USER, ERROR, DEFAULT_PORT, DEFAULT_IP_ADDRESS
 from common.utils import get_message, send_message
+import argparse
+from decos import log
 
-SERVER_LOGGER = logging.getLogger('server')
+LOGGER = logging.getLogger('server')
 
+
+@log
 def process_client_message(message):
     """
     Обработчик сообщений от клиентов, принимает словарь -
@@ -19,7 +24,7 @@ def process_client_message(message):
     :param message:
     :return:
     """
-    SERVER_LOGGER.debug(f'Разбор сообщения от клиента : {message}')
+    LOGGER.debug(f'Разбор сообщения от клиента : {message}')
     if ACTION in message and message[ACTION] == PRESENCE and TIME in message \
             and USER in message and message[USER][ACCOUNT_NAME] == 'Guest':
         return {RESPONSE: 200}
@@ -28,48 +33,40 @@ def process_client_message(message):
         ERROR: 'Bad Request'
     }
 
-def main():
+
+@log
+def create_arg_parser():
+    """Парсер аргументов командной строки"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-p', default=DEFAULT_PORT, type=int, nargs='?')
+    parser.add_argument('-a', default='', nargs='?')
+    return parser
+
+
+def main(listen_address=None):
     """
     Загрузка параметров командной строки, если нет параметров, то задаём значения по умолчанию.
     Сначала обрабатываем порт:
     server.py -p 8079 -a 192.168.0.100
     :return:
     """
-    try:
-        if '-p' in sys.argv:
-            listen_port = int(sys.argv[sys.argv.index('-p') + 1])
-        else:
-            listen_port = DEFAULT_PORT
-        # print(listen_port)
-        if listen_port < 1024 or listen_port > 65535:
-            SERVER_LOGGER.critical(f'Попытка запуска сервера с указанием неподходящего порта '
-                                   f'{listen_port}. Допустимы адреса с 1024 до 65535.')
-            sys.exit(1)
-            # raise ValueError
-    except IndexError:
-        SERVER_LOGGER.critical('После параметра -\'p\' необходимо указать номер порта')
-        # print('После параметра -\'p\' необходимо указать номер порта')
+
+    """Загрузка параметров командной строки, если нет параметров, то задаём значения по умолчанию"""
+    parser = create_arg_parser()
+    namespace = parser.parse_args(sys.argv[1:])
+    if namespace.a == '':
+        listen_address = DEFAULT_IP_ADDRESS
+    else:
+        listen_address = namespace.a
+    listen_port = namespace.p
+
+    # проверка получения корректного номера порта для работы сервера.
+    if not 1023 < listen_port < 65536:
+        LOGGER.critical(f'Попытка запуска сервера с указанием неподходящего порта {listen_port}. '
+                        f'Допустимы адреса с 1024 до 65535.')
         sys.exit(1)
-    # except ValueError:
-    #     print('В качестве порта может быть указано только число в диапазоне от 1024 до 65535.')
-    #     sys.exit(1)
+    LOGGER.info(f'Сервер запущен по адресу: {listen_address}, порт для подключений: {listen_port}')
 
-    # Затем загружаем какой адрес слушать
-
-    try:
-        if '-a' in sys.argv:
-            listen_address = sys.argv[sys.argv.index('-a') + 1]
-        else:
-            listen_address = DEFAULT_IP_ADDRESS
-        # print(listen_address)
-    except IndexError:
-        SERVER_LOGGER.critical('После параметра \'a\'- необходимо указать адрес, который будет слушать сервер.')
-        # print(
-        #     'После параметра \'a\'- необходимо указать адрес, который будет слушать сервер.')
-        sys.exit(1)
-
-    SERVER_LOGGER.info(f'Запущен сервер, порт для подключений: {listen_port}, '
-                           f'адрес подключения: {listen_address}. ')
     # Готовим сокет
 
     transport = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -81,26 +78,23 @@ def main():
 
     while True:
         client, client_address = transport.accept()
-        SERVER_LOGGER.info(f'Установлено соедение с ПК {client_address}')
+        LOGGER.info(f'Установлено соединение с ПК {client_address}')
         try:
-            message_from_cient = get_message(client)
-            SERVER_LOGGER.debug(f'Получено сообщение {message_from_cient}')
-            response = process_client_message(message_from_cient)
-            SERVER_LOGGER.info(f'Cформирован ответ клиенту {response}')
+            message_from_client = get_message(client)
+            LOGGER.debug(f'Получено сообщение {message_from_client}')
+            response = process_client_message(message_from_client)
+            LOGGER.info(f'Сформирован ответ клиенту {response}')
             send_message(client, response)
-            SERVER_LOGGER.debug(f'Соединение с клиентом {client_address} закрывается.')
+            LOGGER.debug(f'Соединение с клиентом {client_address} закрывается.')
             client.close()
-            # message_from_client = get_message(client)
-            # print(message_from_client)
-            # response = process_client_message(message_from_client)
-            # send_message(client, response)
-            # client.close()
         except (ValueError, json.JSONDecodeError):
-            SERVER_LOGGER.error(f'От клиента {client_address} приняты некорректные данные. '
-                                f'Соединение закрывается.')
+            LOGGER.error(f'От клиента {client_address} получена не корректная Json строка . '
+                         f'Соединение закрывается.')
             client.close()
-            # print('Принято некорректное сообщение от клиента.')
-            # client.close()
+        except IncorrectDataRecivedError:
+            LOGGER.error(f'От клиента {client_address} приняты некорректные данные. '
+                         f'Соединение закрывается.')
+            client.close()
 
 
 if __name__ == '__main__':

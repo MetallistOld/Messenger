@@ -1,13 +1,13 @@
 import sys
 import os
 import logging
-sys.path.append(os.path.join(os.getcwd(), '..'))
 from common.variables import LOGGING_LEVEL
+sys.path.append('../')
 
 # Формат логов:
 CLIENT_FORMATTER = logging.Formatter('%(asctime)s %(levelname)s %(filename)s %(message)s')
 
-# Именя файла для логирования
+# Имя файла для логирования
 PATH = os.path.dirname(os.path.abspath(__file__))
 PATH = os.path.join(PATH, 'client.log')
 
